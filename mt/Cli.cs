@@ -285,6 +285,23 @@ namespace Mt
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemSubType(string dataItemSubType) =>
             elements => elements.Where(elem => elem.Attribute("subType")?.Value == dataItemSubType);
 
+        private void OutputStreamsDocument(XDocument doc, Category? category = null, string dataItemId = null, string dataItemName = null, string dataItemType = null, string dataItemSubType = null)
+        {
+            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
+            if (category != null)
+                filters.Add(FilterByCategory(category.Value));
+            if (!string.IsNullOrWhiteSpace(dataItemId))
+                filters.Add(FilterByDataItemId(dataItemId));
+            if (!string.IsNullOrWhiteSpace(dataItemName))
+                filters.Add(FilterByDataItemName(dataItemName));
+            if (!string.IsNullOrWhiteSpace(dataItemType))
+                filters.Add(FilterByDataItemType(dataItemType));
+            if (!string.IsNullOrWhiteSpace(dataItemSubType))
+                filters.Add(FilterByDataItemSubType(dataItemSubType));
+
+            ProcessDoc(doc, filters.ToArray());
+        }
+
         [Command]
         [Description("Sends a current request to the MTConnect agent.")]
         public async Task Current(
@@ -303,21 +320,14 @@ namespace Mt
             if (_agent == null)
                 throw new Exception("No connection to an MTConnect Agent has been configured.");
 
-            var doc = await _agent.CurrentAsync(deviceName, at, path, interval);
-
-            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
-            if (category != null)
-                filters.Add(FilterByCategory(category.Value));
-            if (!string.IsNullOrWhiteSpace(dataItemId))
-                filters.Add(FilterByDataItemId(dataItemId));
-            if (!string.IsNullOrWhiteSpace(dataItemName))
-                filters.Add(FilterByDataItemName(dataItemName));
-            if (!string.IsNullOrWhiteSpace(dataItemType))
-                filters.Add(FilterByDataItemType(dataItemType));
-            if (!string.IsNullOrWhiteSpace(dataItemSubType))
-                filters.Add(FilterByDataItemSubType(dataItemSubType));
-
-            ProcessDoc(doc, filters.ToArray());
+            if(interval!=null && interval.Value > 0)
+                await foreach (var doc in _agent.CurrentAsync(interval.Value, deviceName, at, path))
+                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+            else
+            {
+                var doc = await _agent.CurrentAsync(deviceName, at, path);
+                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+            }
         }
 
         [Command]
@@ -339,21 +349,14 @@ namespace Mt
             if (_agent == null)
                 throw new Exception("No connection to an MTConnect Agent has been configured.");
 
-            var doc = await _agent.SampleAsync(deviceName, from, path, interval, count);
-
-            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
-            if (category != null)
-                filters.Add(FilterByCategory(category.Value));
-            if (!string.IsNullOrWhiteSpace(dataItemId))
-                filters.Add(FilterByDataItemId(dataItemId));
-            if (!string.IsNullOrWhiteSpace(dataItemName))
-                filters.Add(FilterByDataItemName(dataItemName));
-            if (!string.IsNullOrWhiteSpace(dataItemType))
-                filters.Add(FilterByDataItemType(dataItemType));
-            if (!string.IsNullOrWhiteSpace(dataItemSubType))
-                filters.Add(FilterByDataItemSubType(dataItemSubType));
-
-            ProcessDoc(doc, filters.ToArray());
+            if (interval != null && interval.Value > 0)
+                await foreach (var doc in _agent.SampleAsync(interval.Value, deviceName, from, path, count))
+                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+            else
+            {
+                var doc = await _agent.SampleAsync(deviceName, from, path, count);
+                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+            }
         }
 
         [Command]

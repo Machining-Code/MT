@@ -1,8 +1,11 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Net.Http.Headers;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -32,6 +35,22 @@ namespace Mt
             return XDocument.Parse(content);
         }
 
+        private async IAsyncEnumerable<XDocument> XDocumentsFromResponseAsync(HttpWebResponse response)
+        {
+            var stream = response.GetResponseStream();
+            var contentType = Microsoft.Net.Http.Headers.MediaTypeHeaderValue.Parse(response.ContentType);
+            var boundary = HeaderUtilities.RemoveQuotes(contentType.Boundary).Value;
+            for(var streamReader = new MultipartReader(boundary, stream); ;)
+            {
+                var nextFrame = await streamReader.ReadNextSectionAsync();
+                if (nextFrame == null)
+                    yield break;
+
+                using var frameReader = new StreamReader(nextFrame.Body);
+                yield return XDocument.Parse(await frameReader.ReadToEndAsync());
+            }
+        }
+
         /// <summary>
         /// Sends a request for the given <see cref="Uri"/> and returns the response as an <see cref="XDocument"/>
         /// </summary>
@@ -45,6 +64,17 @@ namespace Mt
                 throw new Exception($"MTConnect Agent reported failure: {response.StatusCode} {response.StatusDescription}");
 
             return await XDocumentFromResponseAsync(response as HttpWebResponse);
+        }
+
+        private async IAsyncEnumerable<XDocument> RequestXDocumentsAsync(Uri uri)
+        {
+            var request = WebRequest.Create(uri);
+            var response = await request.GetResponseAsync() as HttpWebResponse;
+            if (response.StatusCode != HttpStatusCode.OK)
+                throw new Exception($"MTConnect Agent reported failure: {response.StatusCode} {response.StatusDescription}");
+
+            await foreach (var doc in XDocumentsFromResponseAsync(response as HttpWebResponse))
+                yield return doc;
         }
 
         /// <summary>
@@ -119,13 +149,31 @@ namespace Mt
         /// <param name="path"></param>
         /// <param name="interval"></param>
         /// <returns></returns>
-        public async Task<XDocument> CurrentAsync(string deviceName = null, ulong? at = null, string path = null, ulong? interval = null)
+        public async Task<XDocument> CurrentAsync(string deviceName = null, ulong? at = null, string path = null)
+        {
+            var uri = _baseUri;
+            uri = BuildUri(uri, deviceName, "current");
+            uri = BuildUriQuery(uri, ("at", at), ("path", path));
+
+            return await RequestXDocumentAsync(uri);
+        }
+
+        /// <summary>
+        /// Send a Current request with an interval specified.
+        /// </summary>
+        /// <param name="interval"></param>
+        /// <param name="deviceName"></param>
+        /// <param name="at"></param>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        public async IAsyncEnumerable<XDocument> CurrentAsync(ulong interval, string deviceName = null, ulong? at = null, string path = null)
         {
             var uri = _baseUri;
             uri = BuildUri(uri, deviceName, "current");
             uri = BuildUriQuery(uri, ("at", at), ("path", path), ("interval", interval));
 
-            return await RequestXDocumentAsync(uri);
+            await foreach(var doc in RequestXDocumentsAsync(uri))
+                yield return doc;
         }
 
         /// <summary>
@@ -137,13 +185,31 @@ namespace Mt
         /// <param name="interval"></param>
         /// <param name="count"></param>
         /// <returns></returns>
-        public async Task<XDocument> SampleAsync(string deviceName = null, ulong? from = null, string path = null, ulong? interval = null, ulong? count = null)
+        public async Task<XDocument> SampleAsync(string deviceName = null, ulong? from = null, string path = null, ulong? count = null)
+        {
+            var uri = _baseUri;
+            uri = BuildUri(uri, deviceName, "sample");
+            uri = BuildUriQuery(uri, ("from", from), ("path", path), ("count", count));
+
+            return await RequestXDocumentAsync(uri);
+        }
+        /// <summary>
+        /// Send a Sample request with an interval specified.
+        /// </summary>
+        /// <param name="interval"></param>
+        /// <param name="deviceName"></param>
+        /// <param name="from"></param>
+        /// <param name="path"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
+        public async IAsyncEnumerable<XDocument> SampleAsync(ulong interval, string deviceName = null, ulong? from = null, string path = null, ulong? count = null)
         {
             var uri = _baseUri;
             uri = BuildUri(uri, deviceName, "sample");
             uri = BuildUriQuery(uri, ("from", from), ("path", path), ("interval", interval), ("count", count));
 
-            return await RequestXDocumentAsync(uri);
+            await foreach (var doc in RequestXDocumentsAsync(uri))
+                yield return doc;
         }
 
         /// <summary>
