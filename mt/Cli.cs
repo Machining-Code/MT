@@ -82,7 +82,6 @@ namespace Mt
                 throw new NotSupportedException($"Cannot output document in format {Format}.");
         }
 
-
         private void ProcessDoc(XDocument doc, params Func<IEnumerable<XElement>, IEnumerable<XElement>>[] filters)
         {
             // Verify that the document does not contain MTConnect errors
@@ -183,6 +182,10 @@ namespace Mt
         {
             if (Verbose) Console.WriteLine($"TEST {agentUri}");
 
+            // Quick check: if no protocol, assume http://
+            if (!agentUri.Contains("://"))
+                agentUri = "http://" + agentUri;
+
             var agent = new Agent(agentUri);
             var doc = await agent.ProbeAsync();
 
@@ -257,7 +260,7 @@ namespace Mt
 
         [Command]
         [Description("Sends a probe request to the MTConnect agent.")]
-        public async Task Probe([Named("deviceName", isOptional: true)] string deviceName = null)
+        public async Task Probe([Named] string deviceName = null)
         {
             if (Verbose) Console.WriteLine($"PROBE {deviceName}");
             if (_agent == null)
@@ -285,15 +288,15 @@ namespace Mt
         [Command]
         [Description("Sends a current request to the MTConnect agent.")]
         public async Task Current(
-            [Named("deviceName", isOptional: true)] string deviceName = null,
-            [Named("at", isOptional: true)] ulong? at = null,
-            [Named("path", isOptional: true)] string path = null,
-            [Named("interval", isOptional: true)] ulong? interval = null,
-            [Named("category", isOptional: true)] Category? category = null,
-            [Named("id", isOptional: true)] string dataItemId = null,
-            [Named("name", isOptional: true)] string dataItemName = null,
-            [Named("type", isOptional: true)] string dataItemType = null,
-            [Named("subType", isOptional: true)] string dataItemSubType = null
+            [Named] string deviceName = null,
+            [Named] ulong? at = null,
+            [Named] string path = null,
+            [Named] ulong? interval = null,
+            [Named] Category? category = null,
+            [Named("id")] string dataItemId = null,
+            [Named("name")] string dataItemName = null,
+            [Named("type")] string dataItemType = null,
+            [Named("subType")] string dataItemSubType = null
             )
         {
             if (Verbose) Console.WriteLine($"CURRENT {deviceName} {at} {path} {interval}");
@@ -320,16 +323,16 @@ namespace Mt
         [Command]
         [Description("Sends a sample request to the MTConnect agent.")]
         public async Task Sample(
-            [Named("deviceName", isOptional: true)] string deviceName = null,
-            [Named("from", isOptional: true)] ulong? from = null,
-            [Named("path", isOptional: true)] string path = null,
-            [Named("interval", isOptional: true)] ulong? interval = null,
-            [Named("count", isOptional: true)] ulong? count = null,
-            [Named("category", isOptional: true)] Category? category = null,
-            [Named("id", isOptional: true)] string dataItemId = null,
-            [Named("name", isOptional: true)] string dataItemName = null,
-            [Named("type", isOptional: true)] string dataItemType = null,
-            [Named("subType", isOptional: true)] string dataItemSubType = null
+            [Named] string deviceName = null,
+            [Named] ulong? from = null,
+            [Named] string path = null,
+            [Named] ulong? interval = null,
+            [Named] ulong? count = null,
+            [Named] Category? category = null,
+            [Named("id")] string dataItemId = null,
+            [Named("name")] string dataItemName = null,
+            [Named("type")] string dataItemType = null,
+            [Named("subType")] string dataItemSubType = null
             )
         {
             if (Verbose) Console.WriteLine($"SAMPLE {deviceName} {from} {path} {interval} {count}");
@@ -356,10 +359,10 @@ namespace Mt
         [Command]
         [Description("Sends an asset request to the MTConnect agent.")]
         public async Task Asset(
-            [Named("assetId", isOptional: true)] string assetId = null,
-            [Named("type", isOptional: true)] string type = null,
-            [Named("removed", isOptional: true)] string removed = null,
-            [Named("count", isOptional: true)] ulong? count = null
+            [Named] string assetId = null,
+            [Named] string type = null,
+            [Named] string removed = null,
+            [Named] ulong? count = null
             )
         {
             if (Verbose) Console.WriteLine($"Asset {assetId} {type} {removed} {count}");

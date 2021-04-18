@@ -89,14 +89,7 @@ namespace Mt.Command
                     {
                         string rawValue;
                         if (!ctxt.NamedArguments.TryGetValue(paramName, out rawValue))
-                        {
-                            // Named parameter missing.
-                            // Emit Type.Missing if optional. Otherwise, error
-                            if (na.IsOptional)
                                 return Type.Missing;
-                            else
-                                throw new ArgumentException($"Argument {paramName} was not provided.");
-                        }
 
                         // Otherwise, the parameter exists, so convert it to the right type and return it.
                         return ConvertRawValue(rawValue, param.ParameterType);

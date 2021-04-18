@@ -8,10 +8,10 @@ namespace Mt.Command
         private readonly int _index;
         private readonly string _argumentName;
 
-        public PositionalAttribute(int index, string paramName = null)
+        public PositionalAttribute(int index, string argumentName = null)
         {
             _index = index;
-            _argumentName = paramName;
+            _argumentName = argumentName;
         }
 
         public int Index => _index;

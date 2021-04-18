@@ -6,20 +6,17 @@ namespace Mt.Command
     public class NamedAttribute : Attribute
     {
         private readonly string _argumentName;
-        private readonly bool _isOptional;
 
         public NamedAttribute()
         {
 
         }
 
-        public NamedAttribute(string name, bool isOptional = false)
+        public NamedAttribute(string name)
         {
             _argumentName = name;
-            _isOptional = isOptional;
         }
 
         public string ArgumentName => _argumentName;
-        public bool IsOptional => _isOptional;
     }
 }
