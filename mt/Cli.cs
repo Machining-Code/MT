@@ -1,4 +1,5 @@
 ﻿using Mt.Command;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -14,48 +15,95 @@ namespace Mt
     public class Cli
     {
         // TODO: 
-        // named args SAMPLES, EVENTS, CONDITION for commands SAMPLE and CURRENT - easier than using xpath
-        // named args TYPE, SUBTYPE, ID for commands SAMPLE and CURRENT - common filters
-        // add support for formats: JSON, CSV with header
+        // add better CSV support
+        // support regex match on name/id filters
 
         private readonly CliBuilder _proc;
         private Agent _agent;
         private Options _options;
 
 
-        private void ProcessDoc(XDocument doc)
+        private void AssertNotErrorsDoc(XDocument doc)
         {
-            // Verify that the document does not contain MTConnect errors
             var errors = doc.Descendants().Where(e => e.Name.LocalName == "Errors");
-            if (errors.Any())
-            {
-                Console.Error.WriteLine($"Error: MTConnect agent returned errors:");
-                foreach (var child in errors)
-                {
-                    Console.Error.WriteLine($"- {child.Value}");
-                }
+            if (!errors.Any())
                 return;
-            }
 
-            // Check output format
-            if (Format == Format.Xml)
+                var message = ($"MTConnect agent reported one or more errors:");
+                foreach (var child in errors)
+                    message += ($"- {child.Value}");
+            throw new Exception(message);
+        }
+
+        private void Output(XDocument doc)
+        {
+            if(Format == Format.Xml)
             {
-                if (HeaderOnly)
+                if(HeaderOnly)
                 {
                     var header = doc.Descendants().Where(e => e.Name.LocalName == "Header").FirstOrDefault();
                     Console.WriteLine(header);
                 }
                 else
+                {
                     Console.WriteLine(doc);
+                }
             }
-            else if (Format == Format.Json)
+            else if(Format == Format.Json)
             {
-                Console.WriteLine("JSON not supported");
+                string json =JsonConvert.SerializeXNode(doc);
+                Console.WriteLine(json);
+            }
+            else if (Format == Format.PrettyJson)
+            {
+                string json = JsonConvert.SerializeXNode(doc, Formatting.Indented);
+                Console.WriteLine(json);
             }
             else
+                throw new NotSupportedException($"Cannot output document in format {Format}.");
+        }
+
+        private void Output(XElement elem)
+        {
+            if (Format == Format.Xml)
+                Console.WriteLine(elem);
+            else if (Format == Format.Json)
+                Console.WriteLine(JsonConvert.SerializeXNode(elem));
+            else if (Format == Format.PrettyJson)
+                Console.WriteLine(JsonConvert.SerializeXNode(elem, Formatting.Indented));
+            else if (Format == Format.CsvNoHeader || Format == Format.Csv)
             {
-                Console.WriteLine($"Format {Format} not supported");
+                //TODO: better CSV handling -- this is broken because no escaping is done
+                foreach (var attr in elem.Attributes())
+                    Console.Write(attr.Value + ", ");
+                Console.WriteLine(elem.Value);
             }
+            else
+                throw new NotSupportedException($"Cannot output document in format {Format}.");
+        }
+
+
+        private void ProcessDoc(XDocument doc, params Func<IEnumerable<XElement>, IEnumerable<XElement>>[] filters)
+        {
+            // Verify that the document does not contain MTConnect errors
+            AssertNotErrorsDoc(doc);
+
+            // If there are no filters, output the entire document
+            if(!filters.Any())
+            {
+                Output(doc);
+                return;
+            }
+
+            // Apply filters and output results
+            // TODO: support formats
+            var elements = doc.Root.DescendantsAndSelf();
+            foreach (var filter in filters)
+                elements = filter(elements);
+
+            foreach (var element in elements)
+                Output(element);
+
         }
 
 
@@ -121,6 +169,11 @@ namespace Mt
         public void Connect([Positional(0)] string agentUri)
         {
             if (Verbose) Console.WriteLine($"CONNECT {agentUri}");
+
+            // Quick check: if no protocol, assume http://
+            if (!agentUri.Contains("://"))
+                agentUri = "http://" + agentUri;
+
             _agent = new Agent(agentUri);
         }
 
@@ -179,7 +232,19 @@ namespace Mt
         {
             if (Verbose) Console.WriteLine($"OPTION {key}={value}");
             _proc.SetOption(key, value);
+        }
 
+        [Command]
+        [Description("Show current value of all options.")]
+        public void ShowOptions()
+        {
+            if (Verbose) Console.WriteLine($"SHOWOPTIONS");
+
+            var options = _proc.GetOptions();
+            foreach(var option in options)
+            {
+                Console.WriteLine($"{option.Key}: {option.Value}");
+            }
         }
 
         [Command]
@@ -202,13 +267,33 @@ namespace Mt
             ProcessDoc(doc);
         }
 
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByCategory(Category category) =>
+            elements => elements.Where(elem => elem.Name.LocalName == category.ToString()).SelectMany(elem => elem.Descendants());
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemId(string dataItemId) =>
+            elements => elements.Where(elem => elem.Attribute("dataItemId")?.Value == dataItemId);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemName(string dataItemName) =>
+            elements => elements.Where(elem => elem.Attribute("name")?.Value == dataItemName);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemType(string dataItemType) =>
+            elements => elements.Where(elem => elem.Name.LocalName == dataItemType);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemSubType(string dataItemSubType) =>
+            elements => elements.Where(elem => elem.Attribute("subType")?.Value == dataItemSubType);
+
         [Command]
         [Description("Sends a current request to the MTConnect agent.")]
         public async Task Current(
             [Named("deviceName", isOptional: true)] string deviceName = null,
             [Named("at", isOptional: true)] ulong? at = null,
             [Named("path", isOptional: true)] string path = null,
-            [Named("interval", isOptional: true)] ulong? interval = null
+            [Named("interval", isOptional: true)] ulong? interval = null,
+            [Named("category", isOptional: true)] Category? category = null,
+            [Named("id", isOptional: true)] string dataItemId = null,
+            [Named("name", isOptional: true)] string dataItemName = null,
+            [Named("type", isOptional: true)] string dataItemType = null,
+            [Named("subType", isOptional: true)] string dataItemSubType = null
             )
         {
             if (Verbose) Console.WriteLine($"CURRENT {deviceName} {at} {path} {interval}");
@@ -216,7 +301,20 @@ namespace Mt
                 throw new Exception("No connection to an MTConnect Agent has been configured.");
 
             var doc = await _agent.CurrentAsync(deviceName, at, path, interval);
-            ProcessDoc(doc);
+
+            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
+            if (category != null)
+                filters.Add(FilterByCategory(category.Value));
+            if (!string.IsNullOrWhiteSpace(dataItemId))
+                filters.Add(FilterByDataItemId(dataItemId));
+            if (!string.IsNullOrWhiteSpace(dataItemName))
+                filters.Add(FilterByDataItemName(dataItemName));
+            if (!string.IsNullOrWhiteSpace(dataItemType))
+                filters.Add(FilterByDataItemType(dataItemType));
+            if (!string.IsNullOrWhiteSpace(dataItemSubType))
+                filters.Add(FilterByDataItemSubType(dataItemSubType));
+
+            ProcessDoc(doc, filters.ToArray());
         }
 
         [Command]
@@ -226,7 +324,12 @@ namespace Mt
             [Named("from", isOptional: true)] ulong? from = null,
             [Named("path", isOptional: true)] string path = null,
             [Named("interval", isOptional: true)] ulong? interval = null,
-            [Named("count", isOptional: true)] ulong? count = null
+            [Named("count", isOptional: true)] ulong? count = null,
+            [Named("category", isOptional: true)] Category? category = null,
+            [Named("id", isOptional: true)] string dataItemId = null,
+            [Named("name", isOptional: true)] string dataItemName = null,
+            [Named("type", isOptional: true)] string dataItemType = null,
+            [Named("subType", isOptional: true)] string dataItemSubType = null
             )
         {
             if (Verbose) Console.WriteLine($"SAMPLE {deviceName} {from} {path} {interval} {count}");
@@ -234,7 +337,20 @@ namespace Mt
                 throw new Exception("No connection to an MTConnect Agent has been configured.");
 
             var doc = await _agent.SampleAsync(deviceName, from, path, interval, count);
-            ProcessDoc(doc);
+
+            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
+            if (category != null)
+                filters.Add(FilterByCategory(category.Value));
+            if (!string.IsNullOrWhiteSpace(dataItemId))
+                filters.Add(FilterByDataItemId(dataItemId));
+            if (!string.IsNullOrWhiteSpace(dataItemName))
+                filters.Add(FilterByDataItemName(dataItemName));
+            if (!string.IsNullOrWhiteSpace(dataItemType))
+                filters.Add(FilterByDataItemType(dataItemType));
+            if (!string.IsNullOrWhiteSpace(dataItemSubType))
+                filters.Add(FilterByDataItemSubType(dataItemSubType));
+
+            ProcessDoc(doc, filters.ToArray());
         }
 
         [Command]

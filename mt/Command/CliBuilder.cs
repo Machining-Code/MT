@@ -88,7 +88,7 @@ namespace Mt.Command
                     paramConverters.Add(ctxt =>
                     {
                         string rawValue;
-                        if (!ctxt.NamedArguments.TryGetValue(name, out rawValue))
+                        if (!ctxt.NamedArguments.TryGetValue(paramName, out rawValue))
                         {
                             // Named parameter missing.
                             // Emit Type.Missing if optional. Otherwise, error
@@ -112,7 +112,7 @@ namespace Mt.Command
                     paramConverters.Add(ctxt =>
                     {
                         string rawValue;
-                        if (!ctxt.NamedArguments.TryGetValue(name, out rawValue))
+                        if (!ctxt.NamedArguments.TryGetValue(paramName, out rawValue))
                             throw new ArgumentException($"Argument {paramName} was not provided.");
 
                         // Otherwise, the parameter exists, so convert it to the right type and return it.
@@ -301,6 +301,9 @@ namespace Mt.Command
 
             info.Assign(value);
         }
+
+        public IEnumerable<KeyValuePair<string, object>> GetOptions()
+            => _options.Select(kvp => new KeyValuePair<string, object>(kvp.Key, GetOption(kvp.Key))).OrderBy(kvp => kvp.Key);
 
         public void AddHelpCommand()
         {

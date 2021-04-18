@@ -2,9 +2,10 @@
 {
     public enum Format
     {
-        Xml = 0,
-        Json = 1,
-        Csv = 2,
-        CsvNoHeader = 3
+        Xml,
+        Json,
+        PrettyJson,
+        Csv,
+        CsvNoHeader
     }
 }
