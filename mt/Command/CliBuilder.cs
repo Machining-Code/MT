@@ -38,8 +38,14 @@ namespace Mt.Command
             return method.GetParameters().Count(p => Attribute.IsDefined(p, typeof(PositionalAttribute)));
         }
 
-        private Func<Context, Task> GetAsyncInvoker(MethodInfo method, object instance = null)
+        private CommandInfo BuildCommandInfo(MethodInfo method, object instance = null)
         {
+            var name = method.GetCustomAttribute<CommandAttribute>()?.CommandName ?? method.Name;
+            var description = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
+            var positionalArgs = new List<ParameterInfo>();
+            var namedArgs = new Dictionary<string, ParameterInfo>(StringComparer.OrdinalIgnoreCase);
+            Func<Context, Task> invoker;
+
             // Critical check
             if (method.IsAbstract)
                 throw new ArgumentException("Method cannot be abstract.");
@@ -62,6 +68,7 @@ namespace Mt.Command
                     // This is a positional argument, so look it up in the context and get its value.
                     // The value will be a string, so it'll be necessary to parse/convert to the appropriate type.
                     var index = pa.Index;
+                    positionalArgs.Add(param);
                     paramConverters.Add(ctxt =>
                     {
                         // Verify that there are enough parameters
@@ -76,7 +83,8 @@ namespace Mt.Command
                 else if (param.GetCustomAttribute<NamedAttribute>() is NamedAttribute na)
                 {
                     // This is a named argument
-                    var name = na.ArgumentName ?? param.Name;
+                    var paramName = na.ArgumentName ?? param.Name;
+                    namedArgs[paramName] = param;
                     paramConverters.Add(ctxt =>
                     {
                         string rawValue;
@@ -87,7 +95,7 @@ namespace Mt.Command
                             if (na.IsOptional)
                                 return Type.Missing;
                             else
-                                throw new ArgumentException($"Argument {name} was not provided.");
+                                throw new ArgumentException($"Argument {paramName} was not provided.");
                         }
 
                         // Otherwise, the parameter exists, so convert it to the right type and return it.
@@ -99,12 +107,13 @@ namespace Mt.Command
                 {
                     // Treat it as a named argument, whose name is the name of the parameter
                     // And is required.
-                    var name = param.Name;
+                    var paramName = param.Name;
+                    namedArgs[paramName] = param;
                     paramConverters.Add(ctxt =>
                     {
                         string rawValue;
                         if (!ctxt.NamedArguments.TryGetValue(name, out rawValue))
-                            throw new ArgumentException($"Argument {name} was not provided.");
+                            throw new ArgumentException($"Argument {paramName} was not provided.");
 
                         // Otherwise, the parameter exists, so convert it to the right type and return it.
                         return ConvertRawValue(rawValue, param.ParameterType);
@@ -117,7 +126,7 @@ namespace Mt.Command
             if (method.ReturnType == typeof(Task))
             {
                 // This is an async method.
-                return async (context) =>
+                invoker = async (context) =>
                 {
                     // Build parameter list
                     var paramsList = paramConverters.Select(converter => converter(context)).ToArray();
@@ -128,13 +137,24 @@ namespace Mt.Command
             else
             {
                 // This is not an async method, so wrap it in one.
-                return async (context) =>
+                invoker = async (context) =>
                 {
                     // Build parameter list
                     var paramsList = paramConverters.Select(converter => converter(context)).ToArray();
                     method.Invoke(instance, paramsList);
                 };
             }
+
+            return new CommandInfo
+            {
+                Name = name,
+                Description = description,
+                Runner = invoker,
+                PositionalArgumentCount = GetPositionalAttributeCount(method),
+                Parameters = method.GetParameters(),
+                PositionalArguments = positionalArgs.ToArray(),
+                NamedArguments = namedArgs
+            };
 
         }
 
@@ -227,17 +247,8 @@ namespace Mt.Command
             {
                 if (method.GetCustomAttribute<CommandAttribute>() is CommandAttribute ca)
                 {
-                    var name = ca.CommandName ?? method.Name;
-                    var description = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
-                    var invoker = GetAsyncInvoker(method, instance);
-                    _commands[name] = new CommandInfo
-                    {
-                        Name = name,
-                        Description = description,
-                        Runner = invoker,
-                        PositionalArgumentCount = GetPositionalAttributeCount(method),
-                        Parameters = method.GetParameters()
-                    };
+                    var info = BuildCommandInfo(method, instance);
+                    _commands[info.Name] = info;
                 }
             }
         }
@@ -313,6 +324,27 @@ namespace Mt.Command
                     Console.Write(spacer);
                     Console.Write(description);
                     Console.WriteLine();
+
+                    if (kvp.Value.PositionalArguments.Any() || kvp.Value.NamedArguments.Any())
+                    {
+
+                        Console.Write(new string(' ', longestCommandLength + 2));
+                        Console.Write("Args: ");
+                        foreach (var arg in kvp.Value.PositionalArguments)
+                        {
+                            Console.Write(arg.GetCustomAttribute<PositionalAttribute>()?.ArgumentName ?? arg.Name);
+                            Console.Write(' ');
+                        }
+
+                        foreach (var arg in kvp.Value.NamedArguments.OrderBy(k => k.Key).Select(k => k.Value))
+                        {
+                            Console.Write("[");
+                            Console.Write(arg.GetCustomAttribute<NamedAttribute>()?.ArgumentName ?? arg.Name);
+                            Console.Write("] ");
+                        }
+                        Console.WriteLine();
+                    }
+
                 }
             });
 
@@ -322,7 +354,9 @@ namespace Mt.Command
                 Description = "Displays this help text.",
                 Parameters = new ParameterInfo[] { },
                 PositionalArgumentCount = 0,
-                Runner = helpFunc
+                Runner = helpFunc,
+                PositionalArguments = new ParameterInfo[] { },
+                NamedArguments = new Dictionary<string, ParameterInfo>()
             };
 
             _commands[info.Name] = info;
@@ -344,7 +378,9 @@ namespace Mt.Command
                 Description = "Displays the version.",
                 Parameters = new ParameterInfo[] { },
                 PositionalArgumentCount = 0,
-                Runner = versionFunc
+                Runner = versionFunc,
+                PositionalArguments = new ParameterInfo[] { },
+                NamedArguments = new Dictionary<string, ParameterInfo>()
             };
 
             _commands[info.Name] = info;
@@ -363,7 +399,9 @@ namespace Mt.Command
                 Description = "Exits the application.",
                 Parameters = new ParameterInfo[] { },
                 PositionalArgumentCount = 0,
-                Runner = exitFunc
+                Runner = exitFunc,
+                PositionalArguments = new ParameterInfo[] { },
+                NamedArguments = new Dictionary<string, ParameterInfo>()
             };
 
             _commands[info.Name] = info;

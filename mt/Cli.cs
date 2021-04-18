@@ -17,9 +17,6 @@ namespace Mt
         // named args SAMPLES, EVENTS, CONDITION for commands SAMPLE and CURRENT - easier than using xpath
         // named args TYPE, SUBTYPE, ID for commands SAMPLE and CURRENT - common filters
         // add support for formats: JSON, CSV with header
-        // better way of setting options - make an options object. we can reflect over it to know what's supported
-        // move error handling into the command processor? (maybe an error event we can handle?)
-        // move repl loop into this class from Program and maybe DRY out with INTERACTIVE
 
         private readonly CliBuilder _proc;
         private Agent _agent;
