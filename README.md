@@ -27,5 +27,7 @@ If multiple filters are applied, the resulting output is a logical AND of all fi
 When running in interactive mode, one command may be entered on each line:
 
   > CONNECT agent.mtconnect.org
+  
   > OPTION format xml
+  
   > SAMPLE -type Angle
