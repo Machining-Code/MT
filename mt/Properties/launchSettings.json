@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "mt": {
+      "commandName": "Project",
+      "commandLineArgs": "interactive"
+    }
+  }
+}
