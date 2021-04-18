@@ -9,10 +9,21 @@ using System.Xml.Linq;
 
 namespace Mt
 {
+    /// <summary>
+    /// An MTConnect agent
+    /// </summary>
     public class Agent
     {
+        /// <summary>
+        /// The base Uri for the MTConnect agent
+        /// </summary>
         private Uri _baseUri;
 
+        /// <summary>
+        /// Creates an <see cref="XDocument"/> from the given <see cref="HttpWebResponse"/>
+        /// </summary>
+        /// <param name="response">The response</param>
+        /// <returns>If the response stream is parsable as XML, an XDocument created from the response stream.</returns>
         private async Task<XDocument> XDocumentFromResponseAsync(HttpWebResponse response)
         {
             using var reader = new StreamReader(response.GetResponseStream());
@@ -21,6 +32,11 @@ namespace Mt
             return XDocument.Parse(content);
         }
 
+        /// <summary>
+        /// Sends a request for the given <see cref="Uri"/> and returns the response as an <see cref="XDocument"/>
+        /// </summary>
+        /// <param name="uri">The Uri to request</param>
+        /// <returns>If the response succeeds with a status code of OK, an XDocument created from the returned XML.</returns>
         private async Task<XDocument> RequestXDocumentAsync(Uri uri)
         {
             var request = WebRequest.Create(uri);
@@ -31,6 +47,12 @@ namespace Mt
             return await XDocumentFromResponseAsync(response as HttpWebResponse);
         }
 
+        /// <summary>
+        /// Build a Uri from the base Uri and possibly-null subpath components, ignoring nulls
+        /// </summary>
+        /// <param name="baseUri"></param>
+        /// <param name="paths"></param>
+        /// <returns></returns>
         private Uri BuildUri(Uri baseUri, params string[] paths)
         {
             if (paths == null || paths.Length == 0)
@@ -43,6 +65,12 @@ namespace Mt
             return builder.Uri;
         }
 
+        /// <summary>
+        /// Build a Uri from the base Uri and tuples for the query string
+        /// </summary>
+        /// <param name="baseUri"></param>
+        /// <param name="values"></param>
+        /// <returns></returns>
         private Uri BuildUriQuery(Uri baseUri, params (string Key, object Value)[] values)
         {
             if (values.Length == 0)
@@ -55,11 +83,25 @@ namespace Mt
             return builder.Uri;
         }
 
+        /// <summary>
+        /// Agent Constructor
+        /// </summary>
+        /// <param name="baseUri">The base Uri of the MTConnect agent</param>
         public Agent(string baseUri)
         {
             _baseUri = new Uri(baseUri);
         }
 
+        /// <summary>
+        /// The BaseUri of the MTConnect agent.
+        /// </summary>
+        public Uri BaseUri => _baseUri;
+
+        /// <summary>
+        /// Send a Probe request.
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <returns></returns>
         public async Task<XDocument> ProbeAsync(string deviceName = null)
         {
             var uri = _baseUri;
@@ -69,6 +111,14 @@ namespace Mt
             return await RequestXDocumentAsync(uri);
         }
 
+        /// <summary>
+        /// Send a Current request
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <param name="at"></param>
+        /// <param name="path"></param>
+        /// <param name="interval"></param>
+        /// <returns></returns>
         public async Task<XDocument> CurrentAsync(string deviceName = null, ulong? at = null, string path = null, ulong? interval = null)
         {
             var uri = _baseUri;
@@ -78,6 +128,15 @@ namespace Mt
             return await RequestXDocumentAsync(uri);
         }
 
+        /// <summary>
+        /// Send a Sample request.
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <param name="from"></param>
+        /// <param name="path"></param>
+        /// <param name="interval"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
         public async Task<XDocument> SampleAsync(string deviceName = null, ulong? from = null, string path = null, ulong? interval = null, ulong? count = null)
         {
             var uri = _baseUri;
@@ -87,6 +146,14 @@ namespace Mt
             return await RequestXDocumentAsync(uri);
         }
 
+        /// <summary>
+        /// Send an Asset/Assets request.
+        /// </summary>
+        /// <param name="assetId"></param>
+        /// <param name="type"></param>
+        /// <param name="removed"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
         public async Task<XDocument> AssetAsync(string assetId = null, string type = null, string removed = null, ulong? count = null)
         {
             var uri = _baseUri;

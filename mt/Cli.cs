@@ -20,13 +20,13 @@ namespace Mt
         // subcommands TYPE, SUBTYPE, ID for commands SAMPLE and CURRENT - common filters
         // (instead of subcommands, make these named parameters)
         // add support for formats: JSON, CSV with header
-        // better way of setting options
+        // better way of setting options - make an options object. we can reflect over it to know what's supported
 
 
 
         private readonly IDictionary<string, object> _options = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         private readonly CommandProcessor _proc;
-        private string _agentUri;
+        private Agent _agent;
 
 
         private string BuildUri(string baseUrl, params string[] others)
@@ -101,7 +101,7 @@ namespace Mt
         public void Connect([Positional(0)] string agentUri)
         {
             if (Verbose) Console.WriteLine($"CONNECT {agentUri}");
-            _agentUri = agentUri;
+            _agent = new Agent(agentUri);
         }
 
         [Command]
@@ -146,7 +146,6 @@ namespace Mt
         [Description("Sets an option specified by a key to a value.")]
         public void Option([Positional(0)] string key, [Positional(1)] string value)
         {
-            if (_agentUri == null) throw new ArgumentNullException("Agent Uri must be specified.");
             if (Verbose) Console.WriteLine($"OPTION {key}={value}");
             _options[key] = value;
         }
@@ -155,65 +154,51 @@ namespace Mt
         [Description("Sends a probe request to the MTConnect agent.")]
         public async Task Probe([Named("deviceName", isOptional: true)] string deviceName = null)
         {
-            if (_agentUri == null) throw new ArgumentNullException("Agent Uri must be specified.");
             if (Verbose) Console.WriteLine($"PROBE {deviceName}");
 
-            var request = WebRequest.Create($"{_agentUri}/{deviceName}");
-            var response = await request.GetResponseAsync();
-            ProcessResponse(response as HttpWebResponse);
-        }
-
-        private void ProcessResponse(HttpWebResponse response)
-        {
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                Console.Error.WriteLine($"Error: MTConnect agent gave response {response.StatusCode} {response.StatusDescription}");
-                return;
-            }
-
-            using var reader = new StreamReader(response.GetResponseStream());
-            var content = reader.ReadToEnd();
-
-            XDocument doc;
             try
             {
-                // Verify that the return is parsable XML and does not contain MTConnect errors
-                doc = XDocument.Parse(content);
-                var errors = doc.Descendants().Where(e => e.Name.LocalName =="Errors");
-                if (errors.Any())
-                {
-                    Console.Error.WriteLine($"Error: MTConnect agent returned errors:");
-                    foreach (var child in errors)
-                    {
-                        Console.Error.WriteLine($"- {child.Value}");
-                    }
-                    return;
-                }
-
-                // Check output format
-                if (Format == "XML")
-                {
-                    if(HeaderOnly)
-                    {
-                        var header = doc.Descendants().Where(e => e.Name.LocalName =="Header").FirstOrDefault();
-                        Console.WriteLine(header);
-                    }
-                    else
-                        Console.WriteLine(content);
-                }
-                else if (Format == "JSON")
-                {
-                    Console.WriteLine("JSON not supported");
-                }
-                else
-                {
-                    Console.WriteLine($"Format {Format} not supported");
-                }
+                var doc = await _agent.ProbeAsync(deviceName);
+                ProcessDoc(doc);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error: Unable to process response from MTConect agent.");
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
+        }
+
+        private void ProcessDoc(XDocument doc)
+        {
+            // Verify that the document does not contain MTConnect errors
+            var errors = doc.Descendants().Where(e => e.Name.LocalName == "Errors");
+            if (errors.Any())
+            {
+                Console.Error.WriteLine($"Error: MTConnect agent returned errors:");
+                foreach (var child in errors)
+                {
+                    Console.Error.WriteLine($"- {child.Value}");
+                }
                 return;
+            }
+
+            // Check output format
+            if (Format == "XML")
+            {
+                if (HeaderOnly)
+                {
+                    var header = doc.Descendants().Where(e => e.Name.LocalName == "Header").FirstOrDefault();
+                    Console.WriteLine(header);
+                }
+                else
+                    Console.WriteLine(doc);
+            }
+            else if (Format == "JSON")
+            {
+                Console.WriteLine("JSON not supported");
+            }
+            else
+            {
+                Console.WriteLine($"Format {Format} not supported");
             }
         }
 
@@ -226,17 +211,17 @@ namespace Mt
             [Named("interval", isOptional: true)] ulong? interval = null
             )
         {
-            if (_agentUri == null) throw new ArgumentNullException("Agent Uri must be specified.");
             if (Verbose) Console.WriteLine($"CURRENT {deviceName} {at} {path} {interval}");
 
-            var uriString = BuildUri(_agentUri, deviceName, "current");
-            uriString = BuildUriQuery(uriString, ("at", at), ("path", path), ("interval", interval));
-
-            var uri = new Uri(uriString);
-
-            var request = WebRequest.Create(uri);
-            var response = await request.GetResponseAsync();
-            ProcessResponse(response as HttpWebResponse);
+            try
+            {
+                var doc = await _agent.CurrentAsync(deviceName, at, path, interval);
+                ProcessDoc(doc);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
         }
 
         [Command]
@@ -249,17 +234,17 @@ namespace Mt
             [Named("count", isOptional: true)] ulong? count = null
             )
         {
-            if (_agentUri == null) throw new ArgumentNullException("Agent Uri must be specified.");
             if (Verbose) Console.WriteLine($"SAMPLE {deviceName} {from} {path} {interval} {count}");
 
-            var uriString = BuildUri(_agentUri, deviceName, "sample");
-            uriString = BuildUriQuery(uriString, ("from", from), ("path", path), ("interval", interval), ("count", count));
-
-            var uri = new Uri(uriString);
-
-            var request = WebRequest.Create(uri);
-            var response = await request.GetResponseAsync();
-            ProcessResponse(response as HttpWebResponse);
+            try
+            {
+                var doc = await _agent.SampleAsync(deviceName, from, path, interval, count);
+                ProcessDoc(doc);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
         }
 
         [Command]
@@ -271,22 +256,17 @@ namespace Mt
             [Named("count", isOptional: true)] ulong? count = null
             )
         {
-            if (_agentUri == null) throw new ArgumentNullException("Agent Uri must be specified.");
             if (Verbose) Console.WriteLine($"Asset {assetId} {type} {removed} {count}");
 
-            string uriString;
-            if (string.IsNullOrWhiteSpace(assetId))
-                uriString = BuildUri(_agentUri, "assets");
-            else
-                uriString = BuildUri(_agentUri, "asset", assetId);
-
-            uriString = BuildUriQuery(uriString, ("type", type), ("removed", removed), ("count", count));
-
-            var uri = new Uri(uriString);
-
-            var request = WebRequest.Create(uri);
-            var response = await request.GetResponseAsync();
-            ProcessResponse(response as HttpWebResponse);
+            try
+            {
+                var doc = await _agent.AssetAsync(assetId, type, removed, count);
+                ProcessDoc(doc);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
         }
 
     }
