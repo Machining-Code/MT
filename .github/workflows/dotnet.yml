@@ -23,5 +23,24 @@ jobs:
       run: dotnet build --no-restore
     - name: Test
       run: dotnet test --no-build --verbosity normal
-    - name: Publish
-      run: dotnet publish -c Release
+    - name: Publish WinX64
+      run: dotnet publish -c Release -r win-x64
+    - name: Publish LinuxX64
+      run: dotnet publish -c Release -r linux-x64
+    - name: Publish LinuxArm64
+      run: dotnet publish -c Release -r linux-arm64
+    - name: MT WinX64 Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: mt-win-x64
+        path: /home/runner/work/MT/MT/mt/bin/Release/net5.0/win-x64/publish/
+    - name: MT LinuxX64 Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: mt-linux-x64
+        path: /home/runner/work/MT/MT/mt/bin/Release/net5.0/linux-x64/publish/
+    - name: MT LinuxArm64 Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: mt-linux-arm64
+        path: /home/runner/work/MT/MT/mt/bin/Release/net5.0/linux-arm64/publish/
