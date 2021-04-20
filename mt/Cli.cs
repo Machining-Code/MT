@@ -1,7 +1,9 @@
-﻿using Mt.Command;
+﻿using CsvHelper;
+using Mt.Command;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -11,11 +13,12 @@ using System.Xml.Linq;
 
 namespace Mt
 {
-
+    /// <summary>
+    /// Implements the CLI commands and REPL.
+    /// </summary>
     public class Cli
     {
         // TODO: 
-        // add better CSV support
         // support regex match on name/id filters
 
         private readonly CliBuilder _proc;
@@ -29,17 +32,17 @@ namespace Mt
             if (!errors.Any())
                 return;
 
-                var message = ($"MTConnect agent reported one or more errors:");
-                foreach (var child in errors)
-                    message += ($"- {child.Value}");
+            var message = ($"MTConnect agent reported one or more errors:");
+            foreach (var child in errors)
+                message += ($"- {child.Value}");
             throw new Exception(message);
         }
 
         private void Output(XDocument doc)
         {
-            if(Format == Format.Xml)
+            if (Format == Format.Xml)
             {
-                if(HeaderOnly)
+                if (HeaderOnly)
                 {
                     var header = doc.Descendants().Where(e => e.Name.LocalName == "Header").FirstOrDefault();
                     Console.WriteLine(header);
@@ -49,9 +52,9 @@ namespace Mt
                     Console.WriteLine(doc);
                 }
             }
-            else if(Format == Format.Json)
+            else if (Format == Format.Json)
             {
-                string json =JsonConvert.SerializeXNode(doc);
+                string json = JsonConvert.SerializeXNode(doc);
                 Console.WriteLine(json);
             }
             else if (Format == Format.PrettyJson)
@@ -63,23 +66,45 @@ namespace Mt
                 throw new NotSupportedException($"Cannot output document in format {Format}.");
         }
 
-        private void Output(XElement elem)
+        private void Output(IEnumerable<XElement> elements)
         {
-            if (Format == Format.Xml)
-                Console.WriteLine(elem);
-            else if (Format == Format.Json)
-                Console.WriteLine(JsonConvert.SerializeXNode(elem));
-            else if (Format == Format.PrettyJson)
-                Console.WriteLine(JsonConvert.SerializeXNode(elem, Formatting.Indented));
-            else if (Format == Format.CsvNoHeader || Format == Format.Csv)
+            if (!elements.Any()) return;
+
+            // Write header text, if any.
+            if(Format == Format.Csv)
             {
-                //TODO: better CSV handling -- this is broken because no escaping is done
-                foreach (var attr in elem.Attributes())
-                    Console.Write(attr.Value + ", ");
-                Console.WriteLine(elem.Value);
+                var sampleItem = elements.FirstOrDefault();
+                if (sampleItem == null) return;
+
+                Console.Write("Type");
+                Console.Write(",");
+                foreach (var attr in sampleItem.Attributes())
+                    Console.Write(attr.Name.LocalName + ",");
+                Console.WriteLine("Value");
             }
-            else
-                throw new NotSupportedException($"Cannot output document in format {Format}.");
+
+            // Write content
+            foreach (var elem in elements)
+            {
+
+                if (Format == Format.Xml)
+                    Console.WriteLine(elem);
+                else if (Format == Format.Json)
+                    Console.WriteLine(JsonConvert.SerializeXNode(elem));
+                else if (Format == Format.PrettyJson)
+                    Console.WriteLine(JsonConvert.SerializeXNode(elem, Formatting.Indented));
+                else if (Format == Format.CsvNoHeader || Format == Format.Csv)
+                {
+                    using var writer = new CsvWriter(Console.Out, CultureInfo.CurrentCulture);
+                    writer.WriteField(elem.Name.LocalName);
+                    foreach (var attr in elem.Attributes())
+                        writer.WriteField(attr.Value);
+                    writer.WriteField(elem.Value);
+                    writer.NextRecord();
+                }
+                else
+                    throw new NotSupportedException($"Cannot output document in format {Format}.");
+            }
         }
 
         private void ProcessDoc(XDocument doc, params Func<IEnumerable<XElement>, IEnumerable<XElement>>[] filters)
@@ -88,30 +113,66 @@ namespace Mt
             AssertNotErrorsDoc(doc);
 
             // If there are no filters, output the entire document
-            if(!filters.Any())
+            if (!filters.Any())
             {
                 Output(doc);
                 return;
             }
 
             // Apply filters and output results
-            // TODO: support formats
             var elements = doc.Root.DescendantsAndSelf();
             foreach (var filter in filters)
                 elements = filter(elements);
 
-            foreach (var element in elements)
-                Output(element);
+            Output(elements);
+        }
 
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByCategory(Category category) =>
+            elements => elements.Where(elem => string.Compare(elem.Name.LocalName, category.ToString(), true) == 0).SelectMany(elem => elem.Descendants());
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemId(string dataItemId) =>
+            elements => elements.Where(elem => string.Compare(elem.Attribute("dataItemId")?.Value, dataItemId, true) == 0);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemName(string dataItemName) =>
+            elements => elements.Where(elem => string.Compare(elem.Attribute("name")?.Value, dataItemName, true) == 0);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemType(string dataItemType) =>
+            elements => elements.Where(elem => string.Compare(elem.Name.LocalName, dataItemType, true) == 0);
+
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemSubType(string dataItemSubType) =>
+            elements => elements.Where(elem => string.Compare(elem.Attribute("subType")?.Value, dataItemSubType, true) == 0);
+
+        private void OutputStreamsDocument(XDocument doc, Category? category = null, string dataItemId = null, string dataItemName = null, string dataItemType = null, string dataItemSubType = null)
+        {
+            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
+            if (category != null)
+                filters.Add(FilterByCategory(category.Value));
+            if (!string.IsNullOrWhiteSpace(dataItemId))
+                filters.Add(FilterByDataItemId(dataItemId));
+            if (!string.IsNullOrWhiteSpace(dataItemName))
+                filters.Add(FilterByDataItemName(dataItemName));
+            if (!string.IsNullOrWhiteSpace(dataItemType))
+                filters.Add(FilterByDataItemType(dataItemType));
+            if (!string.IsNullOrWhiteSpace(dataItemSubType))
+                filters.Add(FilterByDataItemSubType(dataItemSubType));
+
+            ProcessDoc(doc, filters.ToArray());
         }
 
 
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        /// <param name="proc"></param>
         public Cli(CliBuilder proc)
         {
             _proc = proc;
         }
 
 
+        /// <summary>
+        /// Sets up the application
+        /// </summary>
         public void Setup()
         {
             _proc.ProcessObjectForCommands(this);
@@ -129,6 +190,11 @@ namespace Mt
             _proc.ProcessObjectForOptions(_options);
         }
 
+        /// <summary>
+        /// Processes through an args array, running each command until the args are exhausted or an error occurs.
+        /// </summary>
+        /// <param name="args"></param>
+        /// <returns></returns>
         public async Task ProcessToEnd(string[] args)
         {
             while (true)
@@ -157,12 +223,25 @@ namespace Mt
             }
         }
 
+        /// <summary>
+        /// Is verbose mode on
+        /// </summary>
         public bool Verbose => _proc.GetOption<bool>(nameof(Verbose));
 
+        /// <summary>
+        /// Display only header of MTConnect responses
+        /// </summary>
         public bool HeaderOnly => _proc.GetOption<bool>(nameof(HeaderOnly));
 
+        /// <summary>
+        /// Output format
+        /// </summary>
         public Format Format => _proc.GetOption<Format>(nameof(Format));
 
+        /// <summary>
+        /// Creates an agent for use by other commands
+        /// </summary>
+        /// <param name="agentUri"></param>
         [Command]
         [Description("Specifies the URI of the MTConnect agent.")]
         public void Connect([Positional(0)] string agentUri)
@@ -176,6 +255,11 @@ namespace Mt
             _agent = new Agent(agentUri);
         }
 
+        /// <summary>
+        /// Tests whether the given URI answers as an MTConnect Agent
+        /// </summary>
+        /// <param name="agentUri"></param>
+        /// <returns></returns>
         [Command]
         [Description("Tests whether the URI is a valid MTConnect agent.")]
         public async Task Test([Positional(0)] string agentUri)
@@ -189,9 +273,17 @@ namespace Mt
             var agent = new Agent(agentUri);
             var doc = await agent.ProbeAsync();
 
+            if (doc.Root.Name.LocalName != "MTConnectDevices")
+                throw new Exception("Probe did not return an MTConnectDevices document. Not an MTConnect agent.");
+
+
             Console.WriteLine("OK");
         }
 
+        /// <summary>
+        /// Enters interactive mode
+        /// </summary>
+        /// <returns></returns>
         [Command]
         [Description("Enters interactive mode.")]
         public async Task Interactive()
@@ -229,6 +321,11 @@ namespace Mt
             }
         }
 
+        /// <summary>
+        /// Sets an application option
+        /// </summary>
+        /// <param name="key">The option name</param>
+        /// <param name="value">The option value</param>
         [Command]
         [Description("Sets an option specified by a key to a value.")]
         public void Option([Positional(0)] string key, [Positional(1)] string value)
@@ -237,6 +334,9 @@ namespace Mt
             _proc.SetOption(key, value);
         }
 
+        /// <summary>
+        /// Displays all application options and values
+        /// </summary>
         [Command]
         [Description("Show current value of all options.")]
         public void ShowOptions()
@@ -244,12 +344,15 @@ namespace Mt
             if (Verbose) Console.WriteLine($"SHOWOPTIONS");
 
             var options = _proc.GetOptions();
-            foreach(var option in options)
+            foreach (var option in options)
             {
                 Console.WriteLine($"{option.Key}: {option.Value}");
             }
         }
 
+        /// <summary>
+        /// Clears the screen
+        /// </summary>
         [Command]
         [Description("Clears the screen.")]
         public void Clear()
@@ -258,6 +361,11 @@ namespace Mt
             Console.Clear();
         }
 
+        /// <summary>
+        /// Sends a probe request to the current agent
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <returns></returns>
         [Command]
         [Description("Sends a probe request to the MTConnect agent.")]
         public async Task Probe([Named] string deviceName = null)
@@ -270,38 +378,19 @@ namespace Mt
             ProcessDoc(doc);
         }
 
-        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByCategory(Category category) =>
-            elements => elements.Where(elem => elem.Name.LocalName == category.ToString()).SelectMany(elem => elem.Descendants());
-
-        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemId(string dataItemId) =>
-            elements => elements.Where(elem => elem.Attribute("dataItemId")?.Value == dataItemId);
-
-        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemName(string dataItemName) =>
-            elements => elements.Where(elem => elem.Attribute("name")?.Value == dataItemName);
-
-        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemType(string dataItemType) =>
-            elements => elements.Where(elem => elem.Name.LocalName == dataItemType);
-
-        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemSubType(string dataItemSubType) =>
-            elements => elements.Where(elem => elem.Attribute("subType")?.Value == dataItemSubType);
-
-        private void OutputStreamsDocument(XDocument doc, Category? category = null, string dataItemId = null, string dataItemName = null, string dataItemType = null, string dataItemSubType = null)
-        {
-            var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
-            if (category != null)
-                filters.Add(FilterByCategory(category.Value));
-            if (!string.IsNullOrWhiteSpace(dataItemId))
-                filters.Add(FilterByDataItemId(dataItemId));
-            if (!string.IsNullOrWhiteSpace(dataItemName))
-                filters.Add(FilterByDataItemName(dataItemName));
-            if (!string.IsNullOrWhiteSpace(dataItemType))
-                filters.Add(FilterByDataItemType(dataItemType));
-            if (!string.IsNullOrWhiteSpace(dataItemSubType))
-                filters.Add(FilterByDataItemSubType(dataItemSubType));
-
-            ProcessDoc(doc, filters.ToArray());
-        }
-
+        /// <summary>
+        /// Sends a current request to the current agent
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <param name="at"></param>
+        /// <param name="path"></param>
+        /// <param name="interval"></param>
+        /// <param name="category"></param>
+        /// <param name="dataItemId"></param>
+        /// <param name="dataItemName"></param>
+        /// <param name="dataItemType"></param>
+        /// <param name="dataItemSubType"></param>
+        /// <returns></returns>
         [Command]
         [Description("Sends a current request to the MTConnect agent.")]
         public async Task Current(
@@ -320,7 +409,7 @@ namespace Mt
             if (_agent == null)
                 throw new Exception("No connection to an MTConnect Agent has been configured.");
 
-            if(interval!=null && interval.Value > 0)
+            if (interval != null && interval.Value > 0)
                 await foreach (var doc in _agent.CurrentAsync(interval.Value, deviceName, at, path))
                     OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
             else
@@ -330,6 +419,20 @@ namespace Mt
             }
         }
 
+        /// <summary>
+        /// Sends a sample request to the current agent
+        /// </summary>
+        /// <param name="deviceName"></param>
+        /// <param name="from"></param>
+        /// <param name="path"></param>
+        /// <param name="interval"></param>
+        /// <param name="count"></param>
+        /// <param name="category"></param>
+        /// <param name="dataItemId"></param>
+        /// <param name="dataItemName"></param>
+        /// <param name="dataItemType"></param>
+        /// <param name="dataItemSubType"></param>
+        /// <returns></returns>
         [Command]
         [Description("Sends a sample request to the MTConnect agent.")]
         public async Task Sample(
@@ -359,6 +462,14 @@ namespace Mt
             }
         }
 
+        /// <summary>
+        /// Sends an asset or assets request to the current agent
+        /// </summary>
+        /// <param name="assetId"></param>
+        /// <param name="type"></param>
+        /// <param name="removed"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
         [Command]
         [Description("Sends an asset request to the MTConnect agent.")]
         public async Task Asset(

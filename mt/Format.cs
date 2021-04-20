@@ -1,5 +1,8 @@
 ﻿namespace Mt
 {
+    /// <summary>
+    /// Output format
+    /// </summary>
     public enum Format
     {
         Xml,

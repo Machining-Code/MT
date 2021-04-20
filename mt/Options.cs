@@ -2,6 +2,9 @@
 
 namespace Mt
 {
+    /// <summary>
+    /// Application options
+    /// </summary>
     public record Options
     {
         [Option("Verbose")] public bool Verbose { get; set; }

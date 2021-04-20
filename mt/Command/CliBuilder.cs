@@ -300,8 +300,6 @@ namespace Mt.Command
 
         public void AddHelpCommand()
         {
-            // TODO: store parameter info (positional vs named)
-            // so we can display parameter info for commands.
             Func<Context, Task> helpFunc = ctx => Task.Run(() =>
             {
                 Console.WriteLine("Supported Commands: ");
