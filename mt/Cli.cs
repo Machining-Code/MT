@@ -71,7 +71,7 @@ namespace Mt
             if (!elements.Any()) return;
 
             // Write header text, if any.
-            if(Format == Format.Csv)
+            if (Format == Format.Csv)
             {
                 var sampleItem = elements.FirstOrDefault();
                 if (sampleItem == null) return;
@@ -487,5 +487,85 @@ namespace Mt
             ProcessDoc(doc);
         }
 
+        [Command]
+        [Description("Displays basic status of all devices.")]
+        public async Task Status()
+        {
+            if (Verbose) Console.WriteLine($"Status");
+            if (_agent == null)
+                throw new Exception("No connection to an MTConnect Agent has been configured.");
+
+            // Get current status
+            var doc = await _agent.CurrentAsync();
+            AssertNotErrorsDoc(doc);
+
+            // Find device streams
+            var devices = doc.Descendants().Where(elem => elem.Name.LocalName == "DeviceStream");
+            foreach (var devElem in devices)
+            {
+                var name = devElem.Attribute("name")?.Value ?? devElem.Attribute("uuid")?.Value ?? "unknown";
+                Console.BackgroundColor = ConsoleColor.Blue;
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write(name);
+                Console.Write(new string(' ', Console.WindowWidth - name.Length));
+                Console.ResetColor();
+                Console.WriteLine();
+
+                // Find component streams
+                var components = devElem.Descendants().Where(elem => elem.Name.LocalName == "ComponentStream");
+                foreach (var componentElem in components)
+                {
+                    var componentName = componentElem.Attribute("name")?.Value ?? componentElem.Attribute("componentId")?.Value ?? "unknown";
+                    Console.Write("|-");
+                    Console.Write(componentName);
+                    Console.WriteLine();
+
+                    // Find condition
+                    var condition = componentElem.Descendants().FirstOrDefault(elem => elem.Name.LocalName == "Condition");
+                    if (condition != null)
+                        foreach (var conditionElem in condition.Descendants())
+                        {
+                            var actualCondition = conditionElem.Name.LocalName;
+                            var conditionName = conditionElem.Attribute("name")?.Value ?? conditionElem.Attribute("dataItemId")?.Value ?? "unknown";
+                            var timestamp = conditionElem.Attribute("timestamp");
+                            Console.Write("  |-");
+
+                            if (actualCondition == "Normal")
+                            {
+                                Console.BackgroundColor = ConsoleColor.Black;
+                                Console.ForegroundColor = ConsoleColor.Green;
+                            }
+                            else if (actualCondition == "Warning")
+                            {
+                                Console.BackgroundColor = ConsoleColor.Yellow;
+                                Console.ForegroundColor = ConsoleColor.Black;
+                            }
+                            else if (actualCondition == "Fault")
+                            {
+                                Console.BackgroundColor = ConsoleColor.DarkRed;
+                                Console.ForegroundColor = ConsoleColor.White;
+                            }
+                            else if (actualCondition == "Unavailable")
+                            {
+                                Console.BackgroundColor = ConsoleColor.DarkGray;
+                                Console.ForegroundColor = ConsoleColor.Black;
+                            }
+
+                            Console.Write(conditionName);
+                            if (timestamp != null)
+                            {
+                                Console.Write("\t( since ");
+                                Console.Write(timestamp.Value);
+                                Console.Write(")");
+                            }
+
+                            Console.ResetColor();
+                            Console.WriteLine();
+                        }
+                }
+
+                Console.WriteLine();
+            }
+        }
     }
 }
