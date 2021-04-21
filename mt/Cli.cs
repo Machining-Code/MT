@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
@@ -18,8 +19,6 @@ namespace Mt
     /// </summary>
     public class Cli
     {
-        // TODO: 
-        // support regex match on name/id filters
 
         private readonly CliBuilder _proc;
         private Agent _agent;
@@ -127,22 +126,58 @@ namespace Mt
             Output(elements);
         }
 
+        private bool MatchString(string target, string pattern)
+        {
+            var patternExists = !string.IsNullOrWhiteSpace(pattern);
+            var targetExists = !string.IsNullOrWhiteSpace(target);
+            if (patternExists && targetExists && pattern.Length >= 2 && pattern.StartsWith('/') && pattern.EndsWith('/'))
+                return Regex.IsMatch(target, pattern.Substring(1, pattern.Length - 2), RegexOptions.IgnoreCase);
+            else
+                return string.Compare(target, pattern, true) == 0;
+        }
+
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByCategory(Category category) =>
-            elements => elements.Where(elem => string.Compare(elem.Name.LocalName, category.ToString(), true) == 0).SelectMany(elem => elem.Descendants());
+            elements => elements.Where(elem => MatchString(elem.Name.LocalName, category.ToString())).SelectMany(elem => elem.Descendants());
 
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemId(string dataItemId) =>
-            elements => elements.Where(elem => string.Compare(elem.Attribute("dataItemId")?.Value, dataItemId, true) == 0);
+            elements => elements.Where(elem => MatchString(elem.Attribute("dataItemId")?.Value, dataItemId));
 
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemName(string dataItemName) =>
-            elements => elements.Where(elem => string.Compare(elem.Attribute("name")?.Value, dataItemName, true) == 0);
+            elements => elements.Where(elem => MatchString(elem.Attribute("name")?.Value, dataItemName));
 
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemType(string dataItemType) =>
-            elements => elements.Where(elem => string.Compare(elem.Name.LocalName, dataItemType, true) == 0);
+            elements => elements.Where(elem => MatchString(elem.Name.LocalName, dataItemType));
 
         private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByDataItemSubType(string dataItemSubType) =>
-            elements => elements.Where(elem => string.Compare(elem.Attribute("subType")?.Value, dataItemSubType, true) == 0);
+            elements => elements.Where(elem => MatchString(elem.Attribute("subType")?.Value, dataItemSubType));
 
-        private void OutputStreamsDocument(XDocument doc, Category? category = null, string dataItemId = null, string dataItemName = null, string dataItemType = null, string dataItemSubType = null)
+        private Func<IEnumerable<XElement>, IEnumerable<XElement>> FilterByGeneric(string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter)) return elem => elem;
+            var tokens = filter.Split(';');
+            var filters = new List<Predicate<XElement>>();
+
+            foreach(var token in tokens)
+            {
+                var kvpTokens = token.Split('=', 2);
+                if (kvpTokens.Length != 2)
+                    throw new Exception($"Invalid filter: {token}");
+
+                var key = kvpTokens[0];
+                var value = kvpTokens[1];
+
+                if (MatchString(key, "tag"))
+                    filters.Add(elem => MatchString(elem.Name.LocalName, value));
+                else if (MatchString(key, "value"))
+                    filters.Add(elem => MatchString(elem.Value, value));
+                else
+                    filters.Add(elem => MatchString(elem.Attribute(key)?.Value, value));
+            }
+
+            return elements => elements.Where(elem => filters.TrueForAll(filter => filter(elem)));
+        }
+
+        private void OutputStreamsDocument(XDocument doc, Category? category = null, string dataItemId = null, string dataItemName = null, string dataItemType = null, string dataItemSubType = null, string filter = null)
         {
             var filters = new List<Func<IEnumerable<XElement>, IEnumerable<XElement>>>();
             if (category != null)
@@ -155,6 +190,8 @@ namespace Mt
                 filters.Add(FilterByDataItemType(dataItemType));
             if (!string.IsNullOrWhiteSpace(dataItemSubType))
                 filters.Add(FilterByDataItemSubType(dataItemSubType));
+            if (!string.IsNullOrWhiteSpace(filter))
+                filters.Add(FilterByGeneric(filter));
 
             ProcessDoc(doc, filters.ToArray());
         }
@@ -402,7 +439,8 @@ namespace Mt
             [Named("id")] string dataItemId = null,
             [Named("name")] string dataItemName = null,
             [Named("type")] string dataItemType = null,
-            [Named("subType")] string dataItemSubType = null
+            [Named("subType")] string dataItemSubType = null,
+            [Named("filter")] string filter = null
             )
         {
             if (Verbose) Console.WriteLine($"CURRENT {deviceName} {at} {path} {interval}");
@@ -411,11 +449,11 @@ namespace Mt
 
             if (interval != null && interval.Value > 0)
                 await foreach (var doc in _agent.CurrentAsync(interval.Value, deviceName, at, path))
-                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType, filter);
             else
             {
                 var doc = await _agent.CurrentAsync(deviceName, at, path);
-                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType, filter);
             }
         }
 
@@ -445,7 +483,8 @@ namespace Mt
             [Named("id")] string dataItemId = null,
             [Named("name")] string dataItemName = null,
             [Named("type")] string dataItemType = null,
-            [Named("subType")] string dataItemSubType = null
+            [Named("subType")] string dataItemSubType = null,
+            [Named("filter")] string filter = null
             )
         {
             if (Verbose) Console.WriteLine($"SAMPLE {deviceName} {from} {path} {interval} {count}");
@@ -454,14 +493,14 @@ namespace Mt
 
             if (interval != null && interval.Value > 0)
                 await foreach (var doc in _agent.SampleAsync(interval.Value, deviceName, from, path, count))
-                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+                    OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType, filter);
             else
             {
                 var doc = await _agent.SampleAsync(deviceName, from, path, count);
-                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType);
+                OutputStreamsDocument(doc, category, dataItemId, dataItemName, dataItemType, dataItemSubType, filter);
             }
         }
-
+        
         /// <summary>
         /// Sends an asset or assets request to the current agent
         /// </summary>
